@@ -2,3 +2,5 @@
 # Añade estas líneas:
 *.sqlite
 *.log
+twilio.txt
+
