@@ -1,0 +1,4 @@
+# Edita o crea el archivo .gitignore en la raíz del proyecto
+# Añade estas líneas:
+*.sqlite
+*.log
