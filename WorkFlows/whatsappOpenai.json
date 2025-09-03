@@ -1,0 +1,261 @@
+{
+  "name": "WhatsApp Sales Bot (Twilio + OpenAI)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "webhook/twilio/whatsapp",
+        "responseMode": "onReceived",
+        "responseData": "={{{\"status\":\"received\"}}}"
+      },
+      "name": "Webhook Twilio",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Normaliza payload Twilio -> formato interno\nconst input = $json;\nconst from = input.From || input.from || '';\nconst body = input.Body || input.body || '';\nconst messageSid = input.MessageSid || input.messageSid || '';\nreturn [{\n  json: {\n    channel: 'whatsapp',\n    userId: from,\n    text: body,\n    messageId: messageSid,\n    raw: input,\n    receivedAt: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Normalize Incoming",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO messages (user_id, channel, text, direction, message_id, created_at) VALUES ({{ $json[\"userId\"] }}, {{ $json[\"channel\"] }}, {{ $json[\"text\"] }}, 'in', {{ $json[\"messageId\"] }}, now());"
+      },
+      "name": "Save Incoming (Postgres)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        750,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT text, direction, created_at FROM messages WHERE user_id = '{{ $json[\"userId\"] }}' ORDER BY created_at DESC LIMIT 10;"
+      },
+      "name": "Get Context (Postgres)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        1000,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Construir prompt para OpenAI usando contexto\nconst rows = items[0].json || {};\n// Postgres node output will be in items[0].json; if multiple rows, n8n returns arrays differently — ensure previous node returns rows in items[0].json\nconst previousMessages = items[0].json; // adjust if needed\n\n// If the previous node returned as an array under property 'rows' use: const previousMessages = items[0].json.rows || [];\n\nconst userMessage = $input.all()[0].json.text || '';\n\nconst systemPrompt = `Eres un asistente de ventas. Responde de forma breve, clara y orientada a conversión. Pregunta por detalles necesarios para cerrar o pasar a humano. No inventes datos.`;\n\nlet conversation = systemPrompt + \"\\n\\n\";\nif (Array.isArray(previousMessages)) {\n  for (let i = previousMessages.length - 1; i >= 0; i--) {\n    const r = previousMessages[i];\n    conversation += `${r.direction === 'in' ? 'User' : 'Agent'}: ${r.text}\\n`;\n  }\n}\nconversation += `User: ${userMessage}\\nAgent:`;\n\nreturn [{ json: { prompt: conversation } }];"
+      },
+      "name": "Build Prompt",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1250,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.openai.com/v1/chat/completions",
+        "method": "POST",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "= {\n  \"model\": \"gpt-4o-mini\",\n  \"messages\": [\n    {\"role\":\"system\",\"content\":\"Eres un asistente de ventas. Responde de forma breve, clara y orientada a la conversión.\"},\n    {\"role\":\"user\",\"content\": $json[\"prompt\"] }\n  ],\n  \"temperature\": 0.2,\n  \"max_tokens\": 400\n }"
+      },
+      "name": "OpenAI - ChatCompletion",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        1500,
+        300
+      ],
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "functionCode": "// Procesa la respuesta del LLM y prepara reply\nlet llmText = '';\n// OpenAI returns choices. Ajusta según la respuesta exacta de tu proveedor si cambia.\nif (items[0] && items[0].json && items[0].json.choices && items[0].json.choices[0]) {\n  const msg = items[0].json.choices[0].message || items[0].json.choices[0].text || {};\n  llmText = msg.content || msg || '';\n}\n// limpiar HTML\nllmText = llmText.replace(/<[^>]*>/g, '');\nif (llmText.length > 640) llmText = llmText.slice(0, 637) + '...';\n\nreturn [{ json: { reply: llmText } }];"
+      },
+      "name": "Post-process LLM",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1750,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [],
+          "string": [
+            {
+              "value1": "={{$json[\"reply\"]}}",
+              "operation": "isNotEmpty"
+            }
+          ],
+          "number": []
+        }
+      },
+      "name": "If: Has Reply",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        2000,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.twilio.com/2010-04-01/Accounts/{{$env.TWILIO_ACCOUNT_SID}}/Messages.json",
+        "method": "POST",
+        "authentication": "basicAuth",
+        "options": {},
+        "bodyParametersJson": "= { \"From\": \"{{$env.TWILIO_WHATSAPP_FROM}}\", \"To\": $json[\"userId\"], \"Body\": $json[\"reply\"] }"
+      },
+      "name": "Send via Twilio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        2250,
+        220
+      ],
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO messages (user_id, channel, text, direction, message_id, created_at) VALUES ('{{ $json[\"userId\"] }}', 'whatsapp', '{{ $json[\"reply\"] }}', 'out', '{{ $json[\"messageId\"] || '' }}', now());"
+      },
+      "name": "Save Outgoing (Postgres)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [
+        2500,
+        220
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook Twilio": {
+      "main": [
+        [
+          {
+            "node": "Normalize Incoming",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Incoming": {
+      "main": [
+        [
+          {
+            "node": "Save Incoming (Postgres)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Incoming (Postgres)": {
+      "main": [
+        [
+          {
+            "node": "Get Context (Postgres)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Context (Postgres)": {
+      "main": [
+        [
+          {
+            "node": "Build Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Prompt": {
+      "main": [
+        [
+          {
+            "node": "OpenAI - ChatCompletion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI - ChatCompletion": {
+      "main": [
+        [
+          {
+            "node": "Post-process LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post-process LLM": {
+      "main": [
+        [
+          {
+            "node": "If: Has Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If: Has Reply": {
+      "main": [
+        [
+          {
+            "node": "Send via Twilio",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Save Outgoing (Postgres)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send via Twilio": {
+      "main": [
+        [
+          {
+            "node": "Save Outgoing (Postgres)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "1.0.0"
+}

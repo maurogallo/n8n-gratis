@@ -1,0 +1,17 @@
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    restart: always
+    ports:
+      - "5678:5678"
+    volumes:
+      - ./n8n-data:/home/node/.n8n
+    environment:
+      - N8N_PROTOCOL=http
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=user
+      - N8N_BASIC_AUTH_PASSWORD=Renangio2025*
+      # NO PONGAS AQUI N8N_ENCRYPTION_KEY por ahora, dejalo ausente
+      # MODO POR DEFECTO: SQLite (usa database.sqlite en ./n8n-data)
