@@ -1,2 +1,0 @@
-{"__type":"$$EventMessageAudit","id":"3a093671-db9e-4b5d-8190-b8d554ca71eb","ts":"2025-09-03T13:35:55.863-04:00","eventName":"n8n.audit.user.login.success","message":"n8n.audit.user.login.success","payload":{"userId":"36ac08a2-bd61-47fb-bf98-52ec6e6eed56","_email":"maurogallo@gmail.com","_firstName":"Mauricio","_lastName":"Gallo","globalRole":"global:owner","authenticationMethod":"email"}}
-{"__type":"$$EventMessageConfirm","confirm":"3a093671-db9e-4b5d-8190-b8d554ca71eb","ts":"2025-09-03T13:35:55.863-04:00","source":{"id":"0","name":"eventBus"}}
